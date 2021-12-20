@@ -4,8 +4,8 @@
 block_cipher = None
 
 
-a = Analysis(['src\\NodeNotePackage\\Examples\\example.py'],
-             pathex=['D:\Projects\\BaiduNetdiskWorkspace\\NodeNote'],
+a = Analysis(['src/NodeNotePackage/Examples/example.py'],
+             pathex=['/Users/miele/Desktop/node_note/NodeNote'],
              binaries=[],
              datas=[("src/NodeNotePackage/NodeNote/Resources", "src/NodeNotePackage/NodeNote/Resources")],
              hiddenimports=[],
@@ -33,7 +33,9 @@ exe = EXE(pyz,
           disable_windowed_traceback=False,
           target_arch=None,
           codesign_identity=None,
-          entitlements_file=None , icon='src\\NodeNotePackage\\NodeNote\\Resources\\rainbow.ico')
+          entitlements_file=None , icon='src/NodeNotePackage/NodeNote/Resources/rainbow.ico')
+
+
 coll = COLLECT(exe,
                a.binaries,
                a.zipfiles,
@@ -42,3 +44,7 @@ coll = COLLECT(exe,
                upx=True,
                upx_exclude=[],
                name='NodeNote')
+app = BUNDLE(coll,
+             name='NodeNote.app',
+             icon='./src/NodeNotePackage/NodeNote/Resources/rainbow.ico',
+             bundle_identifier=None)
