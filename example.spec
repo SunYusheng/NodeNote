@@ -44,5 +44,5 @@ coll = COLLECT(exe,
                name='NodeNote')
 app = BUNDLE(coll,
              name='NodeNote.app',
-             icon='./src/NodeNotePackage/NodeNote/Resources/rainbow.ico',
+             icon='./src/NodeNotePackage/NodeNote/Resources/images/rainbow.ico',
              bundle_identifier=None)
