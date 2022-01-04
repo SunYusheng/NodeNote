@@ -20,12 +20,12 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
         - Text.
     """
 
-    width = 2
-    color = QtGui.QColor(225, 192, 241, 255)
-    selected_color = QtGui.QColor(0, 153, 121, 255)
-    font = QtWidgets.QApplication([]).font()
+    width = constants.pipe_width
+    color = constants.pipe_color
+    selected_color = constants.pipe_selected_color
+    font = constants.pipe_font
     font.setPointSize(6)
-    font_color = QtGui.QColor(0, 0, 0, 255)
+    font_color = constants.pipe_font_color
 
     def __init__(self, start_port=None, end_port=None, node=None):
         """
@@ -76,12 +76,20 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
         self.ellips_item.hide()
 
         # EDIT
+        self.edit_widget = QtWidgets.QGraphicsWidget(self)
+        self.edit_widget.setFlag(QtWidgets.QGraphicsWidget.ItemSendsGeometryChanges)
+        self.edit_layout = QtWidgets.QGraphicsLinearLayout(QtCore.Qt.Horizontal)
+        self.edit_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_widget.setLayout(self.edit_layout)
+        self.edit_box = QtWidgets.QGraphicsWidget()
         self.edit = attribute.SimpleTextField("info", self)
+        self.edit_box.setGraphicsItem(self.edit)
+        self.edit_layout.addItem(self.edit_box)
         self.edit.setFont(self.font)
         self.edit.setDefaultTextColor(self.font_color)
         bound_rect_width, bound_rect_height = self.edit.boundingRect().width(), self.edit.boundingRect().height()
-        self.edit.setPos(self.path().pointAtPercent(0.5).x() - (bound_rect_width // 2),
-                         self.path().pointAtPercent(0.5).y() - (bound_rect_height // 2))
+        self.edit_widget.setPos(self.mapToScene(self.path().pointAtPercent(0.5).x() - (bound_rect_width // 2),
+                         self.path().pointAtPercent(0.5).y() - (bound_rect_height // 2)))
 
         # CONTROL
         self.choose_first = True
@@ -257,6 +265,8 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
 
         """
 
+        self.prepareGeometryChange()
+
         # source pos
         if self.start_port:
             self.pos_source = self.start_port.parentItem().get_port_position(self.start_port.port_type,
@@ -274,19 +284,28 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
         else:
             self.pos_destination = self.pos_source
 
-        self.prepareGeometryChange()
         self.start_port.parentItem().layout.activate()
         if self.end_port:
             self.end_port.parentItem().layout.activate()
-        self.update()
 
-    # def boundingRect(self) -> QtCore.QRectF:
-    #     return QtCore.QRectF(
-    #         min(self.pos_source.x(), self.pos_destination.x()),
-    #         min(self.pos_source.y(), self.pos_destination.y()),
-    #         abs(self.pos_source.x() - self.pos_destination.x()),
-    #         abs(self.pos_source.y() - self.pos_destination.y()),
-    #     )
+    def boundingRect(self) -> QtCore.QRectF:
+
+        src_point = self.mapFromScene(self.pos_source)
+        des_point = self.mapFromScene(self.pos_destination)
+        con1_point = self.mapFromScene(self.source_item.scenePos())
+        con2_point = self.mapFromScene(self.destination_item.scenePos())
+
+        x_min = min(src_point.x(), des_point.x(), con1_point.x(), con2_point.x())
+        y_min = min(src_point.y(), des_point.y(), con1_point.y(), con2_point.y())
+        x_max = max(src_point.x(), des_point.x(), con1_point.x(), con2_point.x())
+        y_max = max(src_point.y(), des_point.y(), con1_point.y(), con2_point.y())
+
+        return QtCore.QRectF(
+            x_min,
+            y_min,
+            abs(x_max - x_min),
+            abs(y_max - y_min),
+        )
 
     def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionGraphicsItem, widget=None) -> None:
         """
@@ -313,10 +332,11 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
                 self.font_color = self.scene().pipe_style_font_color
         
         # font
-        if not self.font.family() == self.edit.font().family() or not self.font.pointSize() == self.edit.font().pointSize():
-            self.edit.setFont(self.font)
-        if self.edit.defaultTextColor()!= self.font_color:
-            self.edit.setDefaultTextColor(self.font_color)
+        if self.edit_widget:
+            if not self.font.family() == self.edit.font().family() or not self.font.pointSize() == self.edit.font().pointSize():
+                self.edit.setFont(self.font)
+            if self.edit.defaultTextColor()!= self.font_color:
+                self.edit.setDefaultTextColor(self.font_color)
 
         # DEFAULT PEN
         pen = QtGui.QPen(self.color if not self.isSelected() else self.selected_color)
@@ -389,7 +409,7 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
         painter.drawPath(self.path())
 
         # ARROW
-        image = QtGui.QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__), "../Resources/arrow.png")))
+        image = QtGui.QPixmap(os.path.abspath(os.path.join(constants.work_dir, "Resources/Images/arrow.png")))
         image_rectf = QtCore.QRectF(image.rect().x(), image.rect().y(), image.rect().width(), image.rect().height())
         target_rectf = QtCore.QRectF(0, 0, 0, 0)
         if self.start_flag == constants.OUTPUT_NODE_START or (self.start_flag == constants.INPUT_NODE_START and
@@ -402,9 +422,10 @@ class Pipe(QtWidgets.QGraphicsPathItem, serializable.Serializable):
         painter.drawPixmap(target_rectf, image, image_rectf)
 
         # EDIT
-        bound_rect_width, bound_rect_height = self.edit.boundingRect().width(), self.edit.boundingRect().height()
-        self.edit.setPos(self.path().pointAtPercent(0.5).x() - (bound_rect_width // 2),
-                         self.path().pointAtPercent(0.5).y() - (bound_rect_height // 2))
+        if self.edit_widget:
+            bound_rect_width, bound_rect_height = self.edit.boundingRect().width(), self.edit.boundingRect().height()
+            self.edit_widget.setPos(self.path().pointAtPercent(0.5).x() - (bound_rect_width // 2),
+                            self.path().pointAtPercent(0.5).y() - (bound_rect_height // 2))
 
         # ZVALUE
         if self.start_port and self.end_port:
@@ -540,7 +561,7 @@ class ControlPoint(QtWidgets.QGraphicsItem):
         self.setVisible(False)
 
     def boundingRect(self) -> QtCore.QRectF:
-        return QtCore.QRectF(0, 0, self.control_point_radius, self.control_point_radius)
+        return QtCore.QRectF(-self.control_point_radius/2, -self.control_point_radius/2, self.control_point_radius, self.control_point_radius)
 
     def paint(self, painter, option, widget=None) -> None:
         painter.setBrush(self.control_point_color)

@@ -7,8 +7,9 @@ import os
 import time
 
 from PyQt5 import QtWidgets, QtCore, QtGui
+
 from ..Components.attribute import AttributeWidget, BaseWidget
-from ..Model import serializable, constants, stylesheet
+from ..Model import serializable, constants
 
 
 __all__ = ['Todo']
@@ -46,21 +47,20 @@ class Todo(BaseWidget, serializable.Serializable):
         self.control_layout = QtWidgets.QGraphicsLinearLayout(QtCore.Qt.Horizontal)
 
         self.edit = QtWidgets.QLineEdit("task")
-        self.edit.setStyleSheet(stylesheet.STYLE_QLINEEDIT)
 
         self.time_show = QtWidgets.QLabel("0:0:0 + 0:0:0")
-        self.time_show.setStyleSheet(stylesheet.STYLE_QLABEL)
+        self.time_show.setObjectName("todo_label")
         self.time_show.setMinimumWidth(135)
 
-        self.start_png = QtGui.QIcon(QtGui.QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                r'../Resources/start.png'))).scaled(
+        self.start_png = QtGui.QIcon(QtGui.QPixmap(os.path.abspath(os.path.join(constants.work_dir,
+                                                                r'Resources/Images/start.png'))).scaled(
             10,
             10,
             QtCore.Qt.IgnoreAspectRatio,
             QtCore.Qt.SmoothTransformation
         ))
-        self.pause_png = QtGui.QIcon(QtGui.QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                r'../Resources/pause.png'))).scaled(
+        self.pause_png = QtGui.QIcon(QtGui.QPixmap(os.path.abspath(os.path.join(constants.work_dir,
+                                                                r'Resources/Images/pause.png'))).scaled(
             10,
             10,
             QtCore.Qt.IgnoreAspectRatio,
@@ -68,7 +68,6 @@ class Todo(BaseWidget, serializable.Serializable):
         ))
         self.time_button = QtWidgets.QToolButton()
         self.time_button.setIcon(self.start_png)
-        self.time_button.setStyleSheet(stylesheet.STYLE_QTOOLBUTTON)
 
         self.graphics_edit = QtWidgets.QGraphicsProxyWidget()
         self.graphics_edit.setWidget(self.edit)

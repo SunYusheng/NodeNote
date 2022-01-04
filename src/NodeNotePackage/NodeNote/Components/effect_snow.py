@@ -2,14 +2,10 @@ import random
 import os
 
 from PyQt5 import QtCore, QtGui, QtWidgets, sip
-from ..Model.constants import DEBUG_EFFECT_SNOW
-
-
-__all__ = ["EffectSkyWidget"]
+from ..Model import constants
 
 
 class EffectSkyWidget(QtWidgets.QWidget):
-    timer = QtCore.QTimer()
 
     def __init__(self, view_widget, parent=None):
         """
@@ -25,6 +21,7 @@ class EffectSkyWidget(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
         self.path_list = list()
         self.index = 0
+        self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.snow_create)
         self.timer.start(6000)
 
@@ -35,7 +32,7 @@ class EffectSkyWidget(QtWidgets.QWidget):
         """
 
         # DEBUG
-        if DEBUG_EFFECT_SNOW:
+        if constants.DEBUG_EFFECT_SNOW:
             print("1-Debug:    snow_create function running")
         # create snow widget and its path
         snow_widget = SnowWidget(self)
@@ -59,7 +56,7 @@ class EffectSkyWidget(QtWidgets.QWidget):
         """
 
         # DEBUG
-        if DEBUG_EFFECT_SNOW:
+        if constants.DEBUG_EFFECT_SNOW:
             print("2-Debug:    snow_falling function running")
         # pos and size
         start_x = random.randint(0, int(self.width()))
@@ -101,12 +98,12 @@ class EffectSkyWidget(QtWidgets.QWidget):
         sip.delete(snow_widget)
         self.index -= 1
         self.path_list.remove(path_group)
-        if DEBUG_EFFECT_SNOW:
+        if constants.DEBUG_EFFECT_SNOW:
             print("3-Debug:    delete snow widget successfully")
 
 
 class SnowWidget(QtWidgets.QWidget):
-    image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Resources/flower.png'))
+    image_path = constants.flowing_image
 
     def __init__(self, parent=None):
         """
@@ -123,7 +120,7 @@ class SnowWidget(QtWidgets.QWidget):
         Change the flowing image.
 
         Args:
-            path: The flowing image path.
+            path: relative path of The flowing image path.
 
         """
 
@@ -138,6 +135,7 @@ class SnowWidget(QtWidgets.QWidget):
             event: QPaintevent.
 
         """
-
+        
+        super().paintEvent(event)
         painter = QtGui.QPainter(self)
-        painter.drawPixmap(self.rect(), QtGui.QPixmap(self.image_path), QtCore.QRect())
+        painter.drawPixmap(self.rect(), QtGui.QPixmap(os.path.join(constants.work_dir, self.image_path)), QtCore.QRect())

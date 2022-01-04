@@ -1,12 +1,14 @@
 import os
 
+from ..Model import constants
+
 from PyQt5 import QtWidgets, QtCore, QtGui, QtSvg
 
 
-__all__ = ["EffectBackground"]
-
-
 class EffectBackground(QtSvg.QGraphicsSvgItem):
+
+    name = constants.background_image_path
+                                                        
     def __init__(self, view, parent=None):
         """
         Scene svg background image.
@@ -20,9 +22,7 @@ class EffectBackground(QtSvg.QGraphicsSvgItem):
         self.view = view
         self.width = 1080
         self.height = 900
-        self.name = os.path.relpath(os.path.abspath((os.path.join(os.path.dirname(__file__),
-                                                                  "../Resources/background_tree.svg"))))
-        self.svg = QtSvg.QSvgRenderer(self.name)
+        self.svg = QtSvg.QSvgRenderer(os.path.join(constants.work_dir, self.name))
         self.setSharedRenderer(self.svg)
         self.setCacheMode(QtWidgets.QGraphicsItem.ItemCoordinateCache)
 
@@ -44,12 +44,12 @@ class EffectBackground(QtSvg.QGraphicsSvgItem):
         Change the svg image.
 
         Args:
-            path: Svg image path.
+            path: relative path of Svg image path.
 
         """
 
         self.name = path
-        self.svg = QtSvg.QSvgRenderer(path)
+        self.svg = QtSvg.QSvgRenderer(os.path.join(constants.work_dir, path))
         self.setSharedRenderer(self.svg)
 
     def boundingRect(self) -> QtCore.QRectF:

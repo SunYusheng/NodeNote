@@ -2,16 +2,19 @@
 attribute.py - Create many components which can be used in the scene.
 """
 
+from posixpath import relpath
 import re
 import os
 import io
 import time
+import shutil
 import validators
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps, ImageQt
 import numpy as np
 from PyQt5 import QtCore, QtWidgets, QtGui, sip
-from ..Model import constants, stylesheet, serializable
+
+from ..Model import constants, serializable
 from ..Components import port, pipe
 
 __all__ = ["InputTextField", "SimpleTextField",
@@ -29,16 +32,16 @@ class SizeDialog(QtWidgets.QDialog):
 
         super(SizeDialog, self).__init__(parent)
         self.resize(100, 80)
-        self.setWindowTitle("Set Image Width and Height")
-        self.setWindowIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                    "../Resources/Plane.png"))))
+        self.setWindowTitle(QtCore.QCoreApplication.translate("SizeDialog", "Set Image Width and Height"))
+        self.setWindowIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                    "Resources/Images/Plane.png"))))
         self.num_width = QtWidgets.QLineEdit(parent=self)
         self.num_width.setValidator(QtGui.QDoubleValidator())
         self.num_height = QtWidgets.QLineEdit(parent=self)
         self.num_height.setValidator(QtGui.QDoubleValidator())
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Width: ", parent=self), 0, 0, 1, 1)
-        grid.addWidget(QtWidgets.QLabel("Height: ", parent=self), 1, 0, 1, 1)
+        grid.addWidget(QtWidgets.QLabel(QtCore.QCoreApplication.translate("SizeDialog", "Width: "), parent=self), 0, 0, 1, 1)
+        grid.addWidget(QtWidgets.QLabel(QtCore.QCoreApplication.translate("SizeDialog", "Height: "), parent=self), 1, 0, 1, 1)
         grid.addWidget(self.num_width, 0, 1, 1, 1)
         grid.addWidget(self.num_height, 1, 1, 1, 1)
 
@@ -57,8 +60,8 @@ class SizeDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def closeEvent(self, event):
-        reply = QtWidgets.QMessageBox.question(self, 'Close Message',
-                                               "Are you sure to quit?", QtWidgets.QMessageBox.Yes |
+        reply = QtWidgets.QMessageBox.question(self, QtCore.QCoreApplication.translate("SizeDialog", 'Close Message'),
+                                               QtCore.QCoreApplication.translate("SizeDialog", "Are you sure to quit?"), QtWidgets.QMessageBox.Yes |
                                                QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
         if reply == QtWidgets.QMessageBox.Yes:
             event.accept()
@@ -234,7 +237,7 @@ class PythonHighlighter(QtGui.QSyntaxHighlighter):
 
 
 class SimpleTextField(QtWidgets.QGraphicsTextItem):
-    def __init__(self, text, parent):
+    def __init__(self, text, parent=None):
         """
         Simple text field.
 
@@ -244,7 +247,11 @@ class SimpleTextField(QtWidgets.QGraphicsTextItem):
         """
 
         super(SimpleTextField, self).__init__(text, parent)
+        self.setZValue(constants.Z_VAL_CONTAINERS)
         self.setFlags(QtWidgets.QGraphicsWidget.ItemSendsGeometryChanges | QtWidgets.QGraphicsWidget.ItemIsSelectable)
+
+        self.past_scene = None
+        self.past_parent = parent
 
     def mouseDoubleClickEvent(self, event) -> None:
         super(SimpleTextField, self).mouseDoubleClickEvent(event)
@@ -256,24 +263,68 @@ class SimpleTextField(QtWidgets.QGraphicsTextItem):
             self.setFocus(QtCore.Qt.MouseFocusReason)
 
     def mousePressEvent(self, event: 'QtWidgets.QGraphicsSceneMouseEvent') -> None:
-        self.parentItem().mousePressEvent(event)
+        if self.parentItem():
+            self.parentItem().mousePressEvent(event)
 
     def focusInEvent(self, event) -> None:
-        self.setTextInteractionFlags(QtCore.Qt.TextEditorInteraction)
+
+        def subview_in_root(proxy, offset):
+            if proxy.scene() is root_view.current_scene:
+                return offset + root_view.mapFromScene(proxy.scenePos())
+            else:
+                offset += proxy.scene().view.mapFromScene(proxy.scenePos())
+                return subview_in_root(proxy.scene().view.proxy_widget, offset)
+
+        # remove from past scene and added into root scene
+        if not self.scene().view.root_flag:
+            self.past_scene = self.scene()
+
+            # calculate pos
+            root_view = self.past_scene.view.mainwindow.view_widget
+            node_subview_pos = self.past_scene.view.mapFromScene(self.mapToScene(0, 0))
+            subview_pos = subview_in_root(self.past_scene.view.proxy_widget, QtCore.QPointF(0, 0))
+            node_pos = node_subview_pos + subview_pos
+
+            # remove from past scene
+            self.past_parent.edit_layout.removeAt(0)
+            self.setParentItem(None)
+            self.setParent(None)
+            self.past_scene.removeItem(self)
+
+            # add into root scene
+            root_view.current_scene.addItem(self)
+            self.setPos(root_view.mapToScene(node_pos.x(), node_pos.y()))
+
         super(SimpleTextField, self).focusInEvent(event)
+        self.setTextInteractionFlags(QtCore.Qt.TextEditorInteraction)        
 
     def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
-        self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
-        self.textCursor().clearSelection()
         super(SimpleTextField, self).focusOutEvent(event)
+        self.textCursor().clearSelection()
+        self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+
+        if self.past_scene:
+            # added into past scene
+            self.past_scene.addItem(self)
+
+            graphics_widget = QtWidgets.QGraphicsWidget(self.past_parent)
+            graphics_widget.setGraphicsItem(self)
+            self.setParentItem(self.past_parent)
+            self.setPos(QtCore.QPointF(0, 0))
+            self.past_parent.edit_layout.addItem(graphics_widget)
+    
+    def sceneEvent(self, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.GraphicsSceneContextMenu:
+            return True
+        return super().sceneEvent(event)
 
 
 class InputTextField(QtWidgets.QGraphicsTextItem):
     edit_finished = QtCore.pyqtSignal(bool)
     start_editing = QtCore.pyqtSignal()
 
-    font = QtWidgets.QApplication([]).font()
-    font_color = QtGui.QColor(0, 0, 0, 255)
+    font = constants.input_text_font
+    font_color = constants.input_text_font_color
 
     def __init__(self, text, node, parent=None, single_line=False):
         """
@@ -301,7 +352,7 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
         self.origMoveEvent = self.mouseMoveEvent
         self.mouseMoveEvent = self.node.mouseMoveEvent
         # DOCUMNET SETTINGS
-        self.document().setMetaInformation(QtGui.QTextDocument.DocumentUrl, r"Assets/")
+        self.document().setMetaInformation(QtGui.QTextDocument.DocumentUrl, os.path.join(constants.work_dir, "Assets") + "\\")
         self.setDefaultTextColor(self.font_color)
         self.document().setIndentWidth(4)
         self.document().setDefaultFont(self.font)
@@ -750,12 +801,15 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
         if hyperlink.isdigit():
             for item in self.scene().view.mainwindow.view_widget.attribute_widgets:
                 if item.id == int(hyperlink):
+                    self.scene().view.mainwindow.scene_list.clearSelection()
+
                     at_scene = item.scene()
                     self.scene().view.mainwindow.view_widget.last_scene = self.scene().view.mainwindow.view_widget.current_scene
                     self.scene().view.mainwindow.view_widget.last_scene_flag = self.scene().view.mainwindow.view_widget.current_scene_flag
 
                     self.scene().view.mainwindow.view_widget.current_scene = at_scene
                     self.scene().view.mainwindow.view_widget.current_scene_flag = at_scene.sub_scene_flag
+                    self.scene().view.mainwindow.view_widget.current_scene_flag.setSelected(True)
                     self.scene().view.mainwindow.view_widget.background_image = at_scene.background_image
                     self.scene().view.mainwindow.view_widget.cutline = at_scene.cutline
                     self.scene().view.mainwindow.view_widget.setScene(at_scene)
@@ -856,16 +910,13 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
             str_latex = cursor.selection().toPlainText()
             if str_latex.startswith("$") and str_latex.endswith("$") and str_latex.count("$") == 2:
                 image = self.latex_formula(str_latex)
-                image_folder = "Assets"
-                if not os.path.exists(image_folder):
-                    os.makedirs(image_folder)
-                image_name = os.path.join(image_folder, time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
+                if not os.path.exists(os.path.join(constants.work_dir, "Assets")):
+                    os.makedirs(os.path.join(constants.work_dir, "Assets"))
+                image_name = os.path.join(os.path.join(constants.work_dir, "Assets"), time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
                 image.save(image_name, quality=50)
                 cursor.clearSelection()
                 cursor.insertText("\n")
-                image_format = QtGui.QTextImageFormat()
-                image_format.setName(image_name)
-                cursor.insertImage(image_format)
+                cursor.insertImage(image_name)
                 self.editing_state = False
         elif font_type == "Clear":
             cursor.setCharFormat(text_format)
@@ -925,7 +976,7 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
                 clipboard.setMimeData(mime_data)
 
     @staticmethod
-    def paste(cursor):
+    def paste(cursor: QtGui.QTextCursor):
         """
         Ctrl V
 
@@ -937,14 +988,11 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
         mime_data = QtWidgets.QApplication.clipboard().mimeData()
         if mime_data.hasImage():
             image = QtGui.QImage(mime_data.imageData())
-            image_folder = "Assets"
-            if not os.path.exists(image_folder):
-                os.makedirs(image_folder)
-            image_name = os.path.join(image_folder, time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
+            if not os.path.exists(os.path.join(constants.work_dir, "Assets")):
+                os.makedirs(os.path.join(constants.work_dir, "Assets"))
+            image_name = os.path.join(os.path.join(constants.work_dir, "Assets"), time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
             image.save(image_name, quality=50)
-            image_format = QtGui.QTextImageFormat()
-            image_format.setName(image_name)
-            cursor.insertImage(image_format)
+            cursor.insertImage(image_name)
         elif mime_data.hasUrls():
             for u in mime_data.urls():
                 file_ext = os.path.splitext(str(u.toLocalFile()))[1].lower()
@@ -957,15 +1005,12 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
                     first_index = url.rindex('/')
                     second_index = url[:first_index].rindex('/')
                     if url[second_index + 1: first_index] != "Assets":
-                        image_folder = "Assets"
-                        if not os.path.exists(image_folder):
-                            os.makedirs(image_folder)
+                        if not os.path.exists(os.path.join(constants.work_dir, "Assets")):
+                            os.makedirs(os.path.join(constants.work_dir, "Assets"))
                         image_name = os.path.join(
-                            image_folder, time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
+                            os.path.join(constants.work_dir, "Assets"), time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime()) + '.png')
                         image.save(image_name, quality=50)
-                    image_format = QtGui.QTextImageFormat()
-                    image_format.setName(image_name)
-                    cursor.insertImage(image_format)
+                    cursor.insertImage(image_name)
                 else:
                     text = mime_data.text().replace('\t', '    ')
                     cursor.insertText(text)
@@ -1100,21 +1145,21 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
         if event.type() == QtCore.QEvent.KeyPress:
             if event.matches(QtGui.QKeySequence.Paste):
                 self.paste(self.textCursor())
-                return False
+                return True
             elif event.matches(QtGui.QKeySequence.Copy):
                 self.copy(export_flag=False)
-                return False
+                return True
             elif event.key() == QtCore.Qt.Key_Tab:
                 if event.modifiers() == QtCore.Qt.ControlModifier:
                     if constants.DEBUG_RICHTEXT:
                         print("CTRL + TAB")
                     self.dedent()
-                    return False
+                    return True
                 else:
                     if constants.DEBUG_RICHTEXT:
                         print("TAB")
                     self.indent()
-                    return False
+                    return True
             else:
                 return super(InputTextField, self).sceneEvent(event)
         else:
@@ -1158,7 +1203,6 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
             else:
                 offset += proxy.scene().view.mapFromScene(proxy.scenePos())
                 return subview_in_root(proxy.scene().view.proxy_widget, offset)
-
 
         # remove from past scene and added into root scene
         if not self.scene().view.root_flag:
@@ -1213,8 +1257,9 @@ class InputTextField(QtWidgets.QGraphicsTextItem):
             self.setTextCursor(cursor)
             self.font_size_editing = False
         self.mouseMoveEvent = self.node.mouseMoveEvent
-        if self.node.scene().view.undo_flag:
-            self.node.scene().history.store_history("Editing")
+        if self.node.scene():
+            if self.node.scene().view.undo_flag:
+                self.node.scene().history.store_history("Editing")
 
 
 class SubConstituteWidget(QtWidgets.QGraphicsWidget):
@@ -1292,9 +1337,7 @@ class GroupWidget(QtWidgets.QGroupBox):
         if text == '':
             margin = (0, 2, 0, 0)
             padding_top = '2px'
-        style = stylesheet.STYLE_QGROUPBOX.replace('$PADDING_TOP', padding_top)
         self.layout().setContentsMargins(*margin)
-        self.setStyleSheet(style)
         super(GroupWidget, self).setTitle(text)
 
     def add_node_widget(self, widget):
@@ -1363,7 +1406,6 @@ class TruthWidget(QtWidgets.QGraphicsWidget):
         # new checkbox
         self.truth_checkbox = QtWidgets.QCheckBox("Truth")
         self.truth_checkbox.setChecked(truth)
-        self.truth_checkbox.setStyleSheet(stylesheet.STYLE_QCHECKBOX)
 
         # set font
         font = self.truth_checkbox.font()
@@ -1527,13 +1569,12 @@ class BaseWidget(QtWidgets.QGraphicsWidget):
     def contextMenuEvent(self, event) -> None:
         if self.context_flag:
             menu = QtWidgets.QMenu()
-            menu.setStyleSheet(stylesheet.STYLE_QMENU)
-            move_up = menu.addAction("Move Up")
-            move_up.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                     "../Resources/up.png"))))
-            move_down = menu.addAction("Move Down")
-            move_down.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                       "../Resources/down.png"))))
+            move_up = menu.addAction(QtCore.QCoreApplication.translate("BaseWidget", "move up"))
+            move_up.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                     "Resources/Images/up.png"))))
+            move_down = menu.addAction(QtCore.QCoreApplication.translate("BaseWidget", "move down"))
+            move_down.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                       "Resources/Images/down.png"))))
 
             result = menu.exec(event.globalPos())
             if result == move_up:
@@ -1543,10 +1584,10 @@ class BaseWidget(QtWidgets.QGraphicsWidget):
             self.context_flag = False
 
 class LogicWidget(QtWidgets.QGraphicsWidget, serializable.Serializable):
-    background_color = QtGui.QColor(240, 251, 158, 255)
-    selected_background_color = QtGui.QColor(255, 255, 255, 30)
-    border_color = QtGui.QColor(46, 57, 66, 255)
-    selected_border_color = QtGui.QColor(254, 207, 42, 255)
+    background_color = constants.logic_background_color
+    selected_background_color = constants.logic_selected_background_color
+    border_color = constants.logic_border_color
+    selected_border_color = constants.logic_selected_border_color
 
     def __init__(self, parent=None):
         """
@@ -1565,18 +1606,14 @@ class LogicWidget(QtWidgets.QGraphicsWidget, serializable.Serializable):
         self.setZValue(constants.Z_VAL_NODE)
         self.logic_combobox_input = ComboBox()
         self.logic_combobox_output = ComboBox()
-        self.logic_combobox_input.setStyleSheet(stylesheet.STYLE_QCOMBOBOX)
         self.logic_combobox_input.setMaximumHeight(20)
         logic_list_input = QtWidgets.QListView(self.logic_combobox_input)
-        logic_list_input.setStyleSheet(stylesheet.STYLE_QLISTVIEW)
         self.logic_combobox_input.setView(logic_list_input)
         self.logic_combobox_input.addItems(("And", "Or", "Not"))
         self.logic_combobox_input.clearFocus()
 
-        self.logic_combobox_output.setStyleSheet(stylesheet.STYLE_QCOMBOBOX)
         self.logic_combobox_output.setMaximumHeight(20)
         logic_list_output = QtWidgets.QListView(self.logic_combobox_output)
-        logic_list_output.setStyleSheet(stylesheet.STYLE_QLISTVIEW)
         self.logic_combobox_output.setView(logic_list_output)
         self.logic_combobox_output.addItems(("And", "Or", "Not"))
         self.logic_combobox_output.clearFocus()
@@ -1714,23 +1751,19 @@ class LogicWidget(QtWidgets.QGraphicsWidget, serializable.Serializable):
             self.last_logic.remove(widget)
 
     def start_pipe_animation(self):
+        """
+        Only start animation in next widgets and sub widgets.
+
+        """
+
         self.output_port.start_pipes_animation()
-        self.input_port.start_pipes_animation()
         self.attribute_animation = True
 
         for node in self.next_attribute:
             if not node.attribute_animation:
                 node.start_pipe_animation()
 
-        for node in self.last_attribute:
-            if not node.attribute_animation:
-                node.start_pipe_animation()
-
         for logic in self.next_logic:
-            if not logic.attribute_animation:
-                logic.start_pipe_animation()
-
-        for logic in self.last_logic:
             if not logic.attribute_animation:
                 logic.start_pipe_animation()
 
@@ -2233,7 +2266,7 @@ class ChangeImageOrVideo(QtWidgets.QLabel):
         super(ChangeImageOrVideo, self).__init__(text)
         self.label_type = label_type
         self.parent = parent
-        self.setStyleSheet(stylesheet.STYLE_QLABEL_FILE)
+        self.setObjectName("file_label")
 
     def mousePressEvent(self, ev: QtGui.QMouseEvent) -> None:
         super(ChangeImageOrVideo, self).mousePressEvent(ev)
@@ -2266,7 +2299,7 @@ class AttributeFile(BaseWidget, serializable.Serializable):
         self.image.setAutoFillBackground(True)
         palette = self.image.palette()
         palette.setBrush(QtGui.QPalette.Window, QtGui.QBrush(
-            QtGui.QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__), "../Resources/video.png"))).scaled(
+            QtGui.QPixmap(os.path.abspath(os.path.join(constants.work_dir, "Resources/Images/video.png"))).scaled(
                 self.image.size().width(),
                 self.image.size().height(),
                 QtCore.Qt.IgnoreAspectRatio,
@@ -2298,7 +2331,7 @@ class AttributeFile(BaseWidget, serializable.Serializable):
         self.setLayout(self.layout)
 
         # store
-        self.image_url = os.path.abspath(os.path.join(os.path.dirname(__file__), r"../Resources/video.png"))
+        self.image_url = os.path.abspath(os.path.join(constants.work_dir, r"/Resources/Images/video.png"))
 
         # layout
         self.item_row = 0
@@ -2318,20 +2351,39 @@ class AttributeFile(BaseWidget, serializable.Serializable):
     def turn_image(self):
         image_url, _ = QtWidgets.QFileDialog.getOpenFileName(None, "select image", "", "*.png *.jpg")
         if image_url:
-            self.image_url = image_url
-            palette = self.image.palette()
-            palette.setBrush(QtGui.QPalette.Window, QtGui.QBrush(QtGui.QPixmap(image_url).scaled(
-                self.image.size().width(),
-                self.image.size().height(),
-                QtCore.Qt.IgnoreAspectRatio,
-                QtCore.Qt.SmoothTransformation
-            )))
-            self.image.setPalette(palette)
+            absolute_path = os.path.join(os.path.join(constants.work_dir, "Assets"), os.path.basename(image_url))
+
+            # backup image
+            try:
+                shutil.copyfile(image_url, absolute_path)
+
+                # relative path
+                self.image_url = os.path.relpath(absolute_path, constants.work_dir)
+
+                palette = self.image.palette()
+                palette.setBrush(QtGui.QPalette.Window, QtGui.QBrush(QtGui.QPixmap(absolute_path).scaled(
+                    self.image.size().width(),
+                    self.image.size().height(),
+                    QtCore.Qt.IgnoreAspectRatio,
+                    QtCore.Qt.SmoothTransformation
+                )))
+                self.image.setPalette(palette)
+
+            except Exception as e:
+                QtWidgets.QErrorMessage(self).showMessage(f"Wrong:\n{e}")
 
     def turn_file(self):
         file_url, _ = QtWidgets.QFileDialog.getOpenFileName(None, "select files", "", "any file (*.*)")
         if file_url:
-            self.image.file_url = file_url
+            absolute_path = os.path.join(os.path.join(constants.work_dir, "Attachments"), os.path.basename(file_url))
+
+            # backup image
+            try:
+                shutil.copyfile(file_url, absolute_path)
+                self.image.file_url = os.path.relpath(absolute_path, constants.work_dir)
+
+            except Exception as e:
+                QtWidgets.QErrorMessage(self).showMessage(f"Wrong:\n{e}")
 
     def serialize(self, file_serialization=None):
         file_serialization.file_id = self.id
@@ -2349,7 +2401,7 @@ class AttributeFile(BaseWidget, serializable.Serializable):
         # text
         self.label_item.setPlainText(data.text)
         # image
-        self.image_url = data.cover
+        self.image_url = os.path.join(constants.work_dir, data.cover)
         palette = self.image.palette()
         palette.setBrush(QtGui.QPalette.Window, QtGui.QBrush(QtGui.QPixmap(self.image_url).scaled(
             self.image.size().width(),
@@ -2360,7 +2412,7 @@ class AttributeFile(BaseWidget, serializable.Serializable):
         self.image.setPalette(palette)
         # file
         if data.file:
-            self.image.file_url = data.file
+            self.image.file_url = os.path.join(constants.work_dir, data.file)
         # layout
         self.item_row = data.file_location[0]
         self.item_column = data.file_location[1]
@@ -2381,8 +2433,8 @@ class NoneWidget(QtWidgets.QGraphicsWidget, serializable.Serializable):
 
         super(NoneWidget, self).__init__(parent)
         self.parent_item = parent
-        self.pixmap = QtGui.QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                 "../Resources/blank.png")))
+        self.pixmap = QtGui.QPixmap(os.path.abspath(os.path.join(constants.work_dir,
+                                                                 "Resources/Images/blank.png")))
 
         self.setZValue(constants.Z_VAL_NODE)
         self.setFlags(QtWidgets.QGraphicsItem.ItemIsSelectable)
@@ -2411,12 +2463,14 @@ class NoneWidget(QtWidgets.QGraphicsWidget, serializable.Serializable):
 class AttributeWidget(BaseWidget, serializable.Serializable):
     display_name_changed = QtCore.pyqtSignal(str)
     draw_label = None
-    color = QtGui.QColor(252, 165, 44, 255)
-    selected_color = QtGui.QColor(255, 255, 255, 30)
-    border_color = QtGui.QColor(46, 57, 66, 255)
-    selected_border_color = QtGui.QColor(254, 207, 42, 255)
+    color = constants.attribute_color
+    selected_color = constants.attribute_selected_color
+    border_color = constants.attribute_border_color
+    selected_border_color = constants.attribute_selected_border_color
 
-    width_flag = -1
+    width_flag = constants.attribute_width_flag
+
+    export_sub_scene_flag = True
 
     def __init__(self):
         super(BaseWidget, self).__init__()
@@ -2537,18 +2591,32 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
         # text
         self.mouse_flag = False
 
+        # markdown
+        self.markdown_text = ""
+        self.markdown_saved_flag = False
+
     def paint(self, painter, option, widget=None) -> None:
-        painter.save()
 
         # color and width init
         if self.scene().attribute_style_background_color and not self.color_flag:
             self.color = self.scene().attribute_style_background_color
+        elif not self.color_flag:
+            self.color = AttributeWidget.color
+
         if self.scene().attribute_style_selected_background_color and not self.selected_color_flag:
             self.selected_color = self.scene().attribute_style_selected_background_color
+        elif not self.selected_color_flag:
+            self.selected_color = AttributeWidget.selected_color
+
         if self.scene().attribute_style_border_color and not self.border_flag:
             self.border_color = self.scene().attribute_style_border_color
+        elif not self.border_flag:
+            self.border_color = AttributeWidget.border_color
+        
         if self.scene().attribute_style_selected_border_color and not self.selected_border_flag:
             self.selected_border_color = self.scene().attribute_style_selected_border_color
+        elif not self.selected_border_flag:
+            self.selected_border_color = AttributeWidget.selected_border_color
 
         # draw border
         bg_border = 1.0
@@ -2585,8 +2653,6 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
         painter.setPen(pen if not self.colliding_co else
                        QtGui.QPen(QtGui.QColor(230, 0, 0, 100), 2))
         painter.drawPath(path)
-
-        painter.restore()
 
     def text_change_node_shape(self):
         """
@@ -2773,6 +2839,7 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
         elif flag == "view":
             from .sub_view import ProxyView
             subwidget = ProxyView(self.scene().view.mainwindow)
+            self.scene().view.mainwindow.view_widget.children_view[subwidget.id] = subwidget
         elif flag == "todo":
             from .todo import Todo
             subwidget = Todo(self)
@@ -3225,25 +3292,20 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
         self.sub_scene = None
 
     def start_pipe_animation(self):
+        """"
+        Only start animation in output port and sub widgets.
+
+        """
+
         self.true_output_port.start_pipes_animation()
         self.false_output_port.start_pipes_animation()
-        self.true_input_port.start_pipes_animation()
-        self.false_input_port.start_pipes_animation()
         self.attribute_animation = True
 
         for node in self.next_attribute:
             if not node.attribute_animation:
                 node.start_pipe_animation()
 
-        for node in self.last_attribute:
-            if not node.attribute_animation:
-                node.start_pipe_animation()
-
         for logic in self.next_logic:
-            if not logic.attribute_animation:
-                logic.start_pipe_animation()
-
-        for logic in self.last_logic:
             if not logic.attribute_animation:
                 logic.start_pipe_animation()
 
@@ -3252,17 +3314,15 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
                 sub_node.start_pipe_animation()
 
     def end_pipe_animation(self):
+        """
+        Only end animation in output port and sub widgets.
+        """
+
         self.true_output_port.end_pipes_animation()
         self.false_output_port.end_pipes_animation()
-        self.true_input_port.end_pipes_animation()
-        self.false_input_port.end_pipes_animation()
         self.attribute_animation = False
 
         for node in self.next_attribute:
-            if node.attribute_animation:
-                node.end_pipe_animation()
-
-        for node in self.last_attribute:
             if node.attribute_animation:
                 node.end_pipe_animation()
 
@@ -3270,12 +3330,8 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
             if logic.attribute_animation:
                 logic.end_pipe_animation()
 
-        for logic in self.last_logic:
-            if logic.attribute_animation:
-                logic.end_pipe_animation()
-
         for sub_node in self.attribute_sub_widgets:
-            if isinstance(sub_node, AttributeWidget) and not sub_node.attribute_animation:
+            if isinstance(sub_node, AttributeWidget) and sub_node.attribute_animation:
                 sub_node.end_pipe_animation()
 
     def update_treelist(self):
@@ -3602,43 +3658,86 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
                 self.scene().history.store_history("Attribute Widget Size Changed")
         else:
             super(AttributeWidget, self).mouseReleaseEvent(event)
+    
+    def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
+        """
+        change markdown whenever focus of attribute widget changed.
+
+
+        """
+
+        send_id = dict()
+
+        # data
+        send_id["old_focus_item"] = self.id
+        send_id["new_focus_item"] = self.id
+
+        # send data to js
+        if constants.DEBUG_MARKDOWN:
+            print(f"Read 1.foucusInEvent->{send_id}")
+
+        self.scene().view.mainwindow.load_window.show_markdown(send_id)
+        self.scene().view.mainwindow.load_window.show_image(send_id)
+
+        return super().focusInEvent(event)
+    
+    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
+        """
+        change markdown whenever focus of attribute widget changed.
+
+
+        """
+
+        send_id = dict()
+
+        # data
+        send_id["old_focus_item"] = self.id
+        send_id["new_focus_item"] = self.id
+
+        # send data to js
+        if constants.DEBUG_MARKDOWN:
+            print(f"Write 1.focusOutEvent->{send_id}")
+
+        self.scene().view.mainwindow.markdown_view.set_id(send_id)
+        self.scene().view.mainwindow.side_draw.set_id(send_id)
+
+        return super().focusOutEvent(event)
 
     def contextMenuEvent(self, event: 'QtGui.QContextMenuEvent') -> None:
         if self.context_flag:
             menu = QtWidgets.QMenu()
-            menu.setStyleSheet(stylesheet.STYLE_QMENU)
-            add_line_subwidget = menu.addAction("Add Line Subwidget")
+            add_line_subwidget = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add current-line subwidget"))
             add_line_subwidget.setIcon(QtGui.QIcon(
-                os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                             "../Resources/add_line_widget.PNG"))))
-            add_subwidget = menu.addAction("Add Subwidget")
+                os.path.abspath(os.path.join(constants.work_dir,
+                                             "Resources/Images/add_line_widget.PNG"))))
+            add_subwidget = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add next-line subwidget"))
             add_subwidget.setIcon(
-                QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                         "../Resources/add_widget.png"))))
-            add_line_file = menu.addAction("Add Line File")
-            add_line_file.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                           "../Resources/add_line_video.png"))))
-            add_file = menu.addAction("Add File")
-            add_file.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                      "../Resources/add_video.png"))))
-            add_line_view = menu.addAction("Add Line View")
-            add_line_view.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                           "../Resources/sub view.png"))))
-            add_view = menu.addAction("Add View")
-            add_view.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                      "../Resources/sub view.png"))))
-            add_todo_line = menu.addAction("Add Todo Inline")
-            add_todo_line.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                           "../Resources/Todo.png"))))
-            add_todo = menu.addAction("Add Todo")
-            add_todo.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                      "../Resources/Todo.png"))))
-            move_up = menu.addAction("Move Up")
-            move_up.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                     "../Resources/up.png"))))
-            move_down = menu.addAction("Move Down")
-            move_down.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                                       "../Resources/down.png"))))
+                QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                         "Resources/Images/add_widget.png"))))
+            add_line_file = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add current-line file"))
+            add_line_file.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                           "Resources/Images/add_line_video.png"))))
+            add_file = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add next-line file"))
+            add_file.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                      "Resources/Images/add_video.png"))))
+            add_line_view = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add current-line view"))
+            add_line_view.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                           "Resources/Images/sub view.png"))))
+            add_view = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add next-line view"))
+            add_view.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                      "Resources/Images/sub view.png"))))
+            add_todo_line = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add current-line todo"))
+            add_todo_line.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                           "Resources/Images/Todo.png"))))
+            add_todo = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "add next-line todo"))
+            add_todo.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                      "Resources/Images/Todo.png"))))
+            move_up = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "move up"))
+            move_up.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                     "Resources/Images/up.png"))))
+            move_down = menu.addAction(QtCore.QCoreApplication.translate("AttributeWidget", "move down"))
+            move_down.setIcon(QtGui.QIcon(os.path.abspath(os.path.join(constants.work_dir,
+                                                                       "Resources/Images/down.png"))))
             result = menu.exec(event.globalPos())
 
             if result == add_line_subwidget:
@@ -3714,7 +3813,7 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
                 attribute_sub_widget.serialize(attr_serialization.none_serialization.add())
 
         # sub scene
-        if self.sub_scene:
+        if self.sub_scene and AttributeWidget.export_sub_scene_flag:
             self.sub_scene.serialize(attr_serialization.sub_scene_serialization.add())
 
         # highlighter
@@ -3747,6 +3846,13 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
         attr_serialization.mouse_flag = self.mouse_flag
         attr_serialization.mouse_text_width = self.attribute_widget.label_item.textWidth()
 
+    @staticmethod
+    def sub_function(get_str):
+        '<img src="(.+?)"(.*?)>'
+        attr = get_str.group(2)
+        rel_path = os.path.join(os.path.join(constants.work_dir, "Assets"), os.path.basename(get_str.group(1)))
+        return '<img src="%s"%s>' % (rel_path, attr)
+
     def deserialize(self, data, hashmap: dict, view=None, flag=True):
         if flag:
             # added into current scene and view
@@ -3757,7 +3863,12 @@ class AttributeWidget(BaseWidget, serializable.Serializable):
             hashmap[data.attr_id] = self
             # geometry and contents
             self.setGeometry(data.position[0], data.position[1], data.size[0], data.size[1])
-            self.attribute_widget.label_item.setHtml(data.contents)
+
+            html_data = data.contents
+            if html_data.find(r'<img src=') != -1:
+                html_data = re.sub(r'<img src="(.+?)"(.*?)>',self.sub_function , html_data)
+
+            self.attribute_widget.label_item.setHtml(html_data)
             # ports
             self.true_input_port.deserialize(data.attr_port[0], hashmap, view, flag=True)
             self.false_input_port.deserialize(data.attr_port[1], hashmap, view, flag=True)
