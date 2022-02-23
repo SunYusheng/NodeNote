@@ -14,7 +14,7 @@
 </div>
 
 # **NodeNote**
-
+Fork from https://github.com/YhhHaa/NodeNote
 # 1. 如何运行
 
 > 输入框架IME最好选择`搜狗输入法`
